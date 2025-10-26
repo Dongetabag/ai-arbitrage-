@@ -4,10 +4,14 @@
     "builder": "NIXPACKS"
   },
   "deploy": {
-    "startCommand": "python main.py",
+    "startCommand": "python api/fastapi_endpoints.py",
     "healthcheckPath": "/health",
     "healthcheckTimeout": 100,
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10
+  },
+  "vercel": {
+    "projectId": "prj_sWvgRVAItK5x6DYWTsNBeWN6wOQQ",
+    "orgId": "dongetabags-projects"
   }
 }

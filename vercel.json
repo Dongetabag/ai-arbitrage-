@@ -1,0 +1,18 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "frontend/out/**/*",
+      "use": "@vercel/static"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "/frontend/out/$1"
+    }
+  ],
+  "env": {
+    "RAILWAY_BACKEND_URL": "@railway_backend_url"
+  }
+}
