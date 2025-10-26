@@ -4,7 +4,7 @@
     "builder": "NIXPACKS"
   },
   "deploy": {
-    "startCommand": "python api/fastapi_endpoints.py",
+    "startCommand": "pip install -r requirements-railway.txt && python api/fastapi_endpoints.py",
     "healthcheckPath": "/health",
     "healthcheckTimeout": 100,
     "restartPolicyType": "ON_FAILURE",
