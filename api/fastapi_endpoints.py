@@ -19,10 +19,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from database.db_manager import DatabaseManager
 from database.models import Opportunity, Purchase, Sale, Listing
 
-# Load config
-with open('config/settings.yaml', 'r') as f:
-    config = yaml.safe_load(f)
-
 # Initialize FastAPI
 app = FastAPI(
     title="AI Arbitrage API",
@@ -33,14 +29,26 @@ app = FastAPI(
 # CORS - Allow frontend to access
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001"],
+    allow_origins=["*"],  # Allow all origins for Railway deployment
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Initialize database
-db = DatabaseManager(config)
+# Initialize database with minimal config for Railway
+try:
+    # Load config if available
+    with open('config/settings.yaml', 'r') as f:
+        config = yaml.safe_load(f)
+    db = DatabaseManager(config)
+except:
+    # Fallback minimal config for Railway
+    config = {
+        'database': {
+            'url': 'sqlite:///arbitrage.db'
+        }
+    }
+    db = None  # Disable database for now
 
 
 @app.get("/")
