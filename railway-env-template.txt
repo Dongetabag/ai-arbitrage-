@@ -1,0 +1,57 @@
+# ============================================
+# Railway Environment Variables Template
+# ============================================
+
+# === Automatically Provided by Railway ===
+# (Don't set these - Railway provides them)
+# DATABASE_URL
+# REDIS_URL
+# MONGO_URL
+# PORT
+# RAILWAY_ENVIRONMENT
+# RAILWAY_PROJECT_ID
+# RAILWAY_SERVICE_ID
+
+# === AI API Keys (REQUIRED) ===
+GOOGLE_API_KEY=AIzaSyBOXCq6SjXVOJg7ulD4CT8FoMEvf-wq2ng
+AI_PROVIDER=google
+AI_MODEL=gemini-2.5-flash
+
+# === Marketplace APIs ===
+KEEPA_API_KEY=your_keepa_api_key
+BOOKSCOUTER_API_KEY=your_bookscouter_key
+TCGPLAYER_API_KEY=your_tcgplayer_key
+BUYBOTPRO_API_KEY=your_buybotpro_key
+
+# === Amazon SP-API ===
+AMAZON_SP_CLIENT_ID=your_sp_client_id
+AMAZON_SP_CLIENT_SECRET=your_sp_client_secret
+AMAZON_SP_REFRESH_TOKEN=your_refresh_token
+AMAZON_REGION=us-east-1
+
+# === eBay API ===
+EBAY_APP_ID=your_ebay_app_id
+EBAY_DEV_ID=your_ebay_dev_id
+EBAY_CERT_ID=your_ebay_cert_id
+
+# === Payment Processing ===
+STRIPE_API_KEY=your_stripe_key
+STRIPE_WEBHOOK_SECRET=your_webhook_secret
+
+# === Communication ===
+TWILIO_ACCOUNT_SID=your_twilio_sid
+TWILIO_AUTH_TOKEN=your_twilio_token
+TWILIO_PHONE_NUMBER=your_phone_number
+
+SENDGRID_API_KEY=your_sendgrid_key
+SENDGRID_FROM_EMAIL=noreply@yourdomain.com
+
+# === Monitoring ===
+SENTRY_DSN=your_sentry_dsn
+
+# === Security ===
+SECRET_KEY=your_secret_key_min_32_chars
+API_KEY=your_api_key_for_client_access
+
+# === Frontend URL (for CORS) ===
+FRONTEND_URL=https://frontend-sage-two-68.vercel.app

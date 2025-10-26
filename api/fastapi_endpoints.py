@@ -26,13 +26,25 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# CORS - Allow frontend to access
+# CORS Configuration - Allow Vercel domains
+origins = [
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "https://*.vercel.app",
+    "https://frontend-sage-two-68.vercel.app",
+]
+
+# If VERCEL_URL env var exists, add it
+if vercel_url := os.getenv("VERCEL_URL"):
+    origins.append(f"https://{vercel_url}")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for Railway deployment
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 # Initialize database with minimal config for Railway
@@ -53,7 +65,7 @@ except:
 
 @app.get("/")
 async def root():
-    """Health check"""
+    """Root endpoint"""
     return {
         "service": "AI Arbitrage API",
         "status": "operational",
@@ -61,6 +73,23 @@ async def root():
         "ai": "Google Gemini 2.5 Flash",
         "timestamp": datetime.utcnow().isoformat()
     }
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for Railway"""
+    return {
+        "status": "healthy",
+        "environment": os.getenv("RAILWAY_ENVIRONMENT", "development"),
+        "service": "ai-arbitrage-api",
+        "timestamp": datetime.utcnow().isoformat(),
+        "version": "1.0.0",
+        "message": "AI Arbitrage System is running on Railway"
+    }
+
+# Add OPTIONS handler for preflight CORS requests
+@app.options("/{path:path}")
+async def options_handler(path: str):
+    return {"status": "ok"}
 
 
 @app.get("/api/opportunities")
@@ -263,4 +292,5 @@ if __name__ == "__main__":
     import os
     port = int(os.environ.get("PORT", 8000))
     host = os.environ.get("HOST", "0.0.0.0")
-    uvicorn.run(app, host=host, port=port)
+    print(f"🚀 Starting AI Arbitrage API on {host}:{port}")
+    uvicorn.run(app, host=host, port=port, workers=2)
