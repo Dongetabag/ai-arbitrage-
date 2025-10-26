@@ -1,0 +1,224 @@
+system:
+  name: "AI Arbitrage Gold Mine"
+  version: "1.0.0"
+  timezone: "America/New_York"
+
+categories:
+  # Top 10 categories by profitability
+  books:
+    enabled: true
+    avg_margin: 0.473
+    min_margin: 0.25
+    max_purchase_price: 100
+    priority: 1
+    scan_interval_minutes: 10
+    
+  trading_cards:
+    enabled: true
+    avg_margin: 0.368
+    min_margin: 0.20
+    max_purchase_price: 500
+    priority: 2
+    scan_interval_minutes: 15
+    authentication_required: true
+    
+  video_games:
+    enabled: true
+    avg_margin: 0.342
+    min_margin: 0.20
+    max_purchase_price: 300
+    priority: 3
+    scan_interval_minutes: 15
+    
+  musical_instruments:
+    enabled: true
+    avg_margin: 0.317
+    min_margin: 0.18
+    max_purchase_price: 1000
+    priority: 4
+    scan_interval_minutes: 30
+    
+  lego:
+    enabled: true
+    avg_margin: 0.294
+    min_margin: 0.18
+    max_purchase_price: 400
+    priority: 5
+    scan_interval_minutes: 30
+    
+  sporting_goods:
+    enabled: true
+    avg_margin: 0.289
+    min_margin: 0.18
+    max_purchase_price: 500
+    priority: 6
+    scan_interval_minutes: 30
+    
+  baby_equipment:
+    enabled: true
+    avg_margin: 0.276
+    min_margin: 0.15
+    max_purchase_price: 300
+    priority: 7
+    scan_interval_minutes: 60
+    
+  electronics:
+    enabled: true
+    avg_margin: 0.258
+    min_margin: 0.15
+    max_purchase_price: 800
+    priority: 8
+    scan_interval_minutes: 20
+    authentication_required: true
+    
+  photography:
+    enabled: true
+    avg_margin: 0.243
+    min_margin: 0.15
+    max_purchase_price: 1500
+    priority: 9
+    scan_interval_minutes: 30
+    
+  tools:
+    enabled: true
+    avg_margin: 0.227
+    min_margin: 0.15
+    max_purchase_price: 400
+    priority: 10
+    scan_interval_minutes: 60
+
+marketplaces:
+  # Primary source marketplaces
+  facebook_marketplace:
+    enabled: true
+    scan_interval: 10
+    max_results: 100
+    
+  craigslist:
+    enabled: true
+    scan_interval: 10
+    locations: ["boston", "worcester", "springfield"]
+    
+  offerup:
+    enabled: true
+    scan_interval: 15
+    
+  ebay:
+    enabled: true
+    scan_interval: 15
+    
+  mercari:
+    enabled: true
+    scan_interval: 15
+    
+  nextdoor:
+    enabled: true
+    scan_interval: 30
+    
+  letgo:
+    enabled: true
+    scan_interval: 15
+
+pricing_sources:
+  # Validation and profit calculation
+  keepa:
+    enabled: true
+    check_frequency: "realtime"
+    
+  amazon_sp_api:
+    enabled: true
+    
+  bookscouter:
+    enabled: true
+    
+  tcgplayer:
+    enabled: true
+    
+  pricecharting:
+    enabled: true
+    
+  bricklink:
+    enabled: true
+    
+  goat:
+    enabled: true
+    
+  reverb:
+    enabled: true
+
+retail_monitoring:
+  target:
+    enabled: true
+    check_clearance: true
+    
+  walmart:
+    enabled: true
+    check_rollbacks: true
+    
+  bestbuy:
+    enabled: true
+    check_open_box: true
+    
+  home_depot:
+    enabled: true
+    
+  lowes:
+    enabled: true
+    
+  dicks_sporting_goods:
+    enabled: true
+
+liquidation_sources:
+  bstock:
+    enabled: false  # Requires approval
+    
+  bulq:
+    enabled: false
+    
+  direct_liquidation:
+    enabled: false
+
+ai_settings:
+  # Google Gemini 2.5 Flash - FREE and FAST! 🚀
+  # No more expensive OpenAI bills
+  reasoning:
+    model: "gemini-2.5-flash"
+    temperature: 0.7
+    max_tokens: 2000
+    
+  negotiation:
+    model: "gemini-2.5-flash"
+    max_attempts: 3
+    min_discount_target: 0.10
+    max_discount_target: 0.30
+    
+  customer_support:
+    model: "gemini-2.5-flash"
+    response_time_seconds: 30
+
+risk_management:
+  max_purchase_per_item: 500
+  max_daily_spend: 2000
+  max_weekly_spend: 10000
+  min_profit_margin: 0.20
+  require_auth_above: 300
+  max_item_age_days: 90
+  blacklist_sellers: []
+  
+automation:
+  auto_purchase: false  # Requires manual approval by default
+  auto_list: true
+  auto_respond_support: true
+  auto_negotiate: true
+  
+notifications:
+  email: true
+  sms: true
+  telegram: true
+  high_value_alert_threshold: 1000
+  
+monitoring:
+  prometheus: true
+  sentry: true
+  log_level: "INFO"
+

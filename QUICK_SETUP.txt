@@ -1,0 +1,81 @@
+╔══════════════════════════════════════════════════════════════════╗
+║                                                                  ║
+║  🚀 QUICK SETUP - Get Your API Key & Go Live                    ║
+║                                                                  ║
+╚══════════════════════════════════════════════════════════════════╝
+
+STEP 1: Get OpenAI API Key (5 minutes)
+═══════════════════════════════════════════
+
+1. Go to: https://platform.openai.com/api-keys
+2. Sign up or log in
+3. Click "Create new secret key"
+4. Copy the key (starts with sk-proj-...)
+5. Paste it in the .env file:
+   
+   OPENAI_API_KEY=sk-proj-YOUR_KEY_HERE
+
+
+STEP 2: Test the Connection (30 seconds)
+═══════════════════════════════════════════
+
+Run this command:
+   
+   source venv/bin/activate
+   python scripts/test_apis.py
+
+You should see:
+   ✅ OpenAI connected successfully
+
+
+STEP 3: Launch the System! (instant)
+═══════════════════════════════════════════
+
+A) Backend Only (Simple):
+   
+   python main.py
+
+B) Full Stack with Dashboard (Recommended):
+   
+   docker-compose up -d
+   open http://localhost:3000
+
+
+THAT'S IT! 🎯
+═══════════════════════════════════════════
+
+The AI will start:
+- Scanning marketplaces every 10 minutes
+- Finding profitable opportunities
+- Analyzing with GPT-4
+- Calculating exact profit margins
+- Saving opportunities for your review
+
+You'll see opportunities appear in:
+- Terminal output (if running main.py)
+- Dashboard at http://localhost:3000 (if using Docker)
+- Database (arbitrage.db)
+
+
+OPTIONAL: Boost Profit with More APIs
+═══════════════════════════════════════════
+
+Add these for even better results:
+
+1. Keepa API ($20/month) - Amazon pricing
+   https://keepa.com/#!api
+   → Add to .env: KEEPA_API_KEY=
+
+2. BookScouter API (FREE!) - Book buyback prices
+   https://bookscouter.com/api
+   → Add to .env: BOOKSCOUTER_API_KEY=
+
+
+NEED HELP?
+═══════════════════════════════════════════
+
+- Read: START_HERE.md
+- Check: GETTING_STARTED.md
+- View: 🚀_START_PROFIT_ENGINE.md
+
+Your profit engine awaits! 💰

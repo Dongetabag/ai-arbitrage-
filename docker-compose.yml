@@ -1,0 +1,186 @@
+version: '3.8'
+
+services:
+  # Python AI Backend
+  python-api:
+    build: .
+    container_name: arbitrage_python_api
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./logs:/app/logs
+      - ./data:/app/data
+    depends_on:
+      - postgres
+      - redis
+      - mongodb
+    restart: unless-stopped
+    networks:
+      - arbitrage_network
+    command: uvicorn api.fastapi_endpoints:app --host 0.0.0.0 --port 8000
+
+  # NestJS Backend (TypeScript microservices)
+  nestjs-api:
+    build:
+      context: ./backend-nestjs
+      dockerfile: Dockerfile
+    container_name: arbitrage_nestjs_api
+    env_file:
+      - .env
+    ports:
+      - "3001:3001"
+    depends_on:
+      - postgres
+      - redis
+      - mongodb
+    restart: unless-stopped
+    networks:
+      - arbitrage_network
+
+  # React Frontend Dashboard
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: arbitrage_frontend
+    env_file:
+      - .env
+    environment:
+      - API_URL=http://python-api:8000
+      - WS_URL=ws://python-api:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - python-api
+      - nestjs-api
+    restart: unless-stopped
+    networks:
+      - arbitrage_network
+
+  # PostgreSQL database (ACID compliance for transactions)
+  postgres:
+    image: postgres:15-alpine
+    container_name: arbitrage_db
+    environment:
+      POSTGRES_DB: arbitrage_db
+      POSTGRES_USER: arbitrage_user
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - arbitrage_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U arbitrage_user"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis for caching and job queue
+  redis:
+    image: redis:7-alpine
+    container_name: arbitrage_redis
+    command: redis-server --appendonly yes --maxmemory 2gb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - arbitrage_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # MongoDB for high-volume price scrapes
+  mongodb:
+    image: mongo:7
+    container_name: arbitrage_mongodb
+    environment:
+      MONGO_INITDB_DATABASE: arbitrage_db
+    volumes:
+      - mongodb_data:/data/db
+    ports:
+      - "27017:27017"
+    networks:
+      - arbitrage_network
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Celery worker for async tasks
+  celery_worker:
+    build: .
+    container_name: arbitrage_celery
+    command: celery -A tasks.celery worker --loglevel=info
+    env_file:
+      - .env
+    depends_on:
+      - redis
+      - postgres
+    networks:
+      - arbitrage_network
+
+  # Celery beat for scheduled tasks
+  celery_beat:
+    build: .
+    container_name: arbitrage_scheduler
+    command: celery -A tasks.celery beat --loglevel=info
+    env_file:
+      - .env
+    depends_on:
+      - redis
+    networks:
+      - arbitrage_network
+
+  # Main Application (Market Scanner & AI Engine)
+  main-app:
+    build: .
+    container_name: arbitrage_main_app
+    env_file:
+      - .env
+    volumes:
+      - ./logs:/app/logs
+      - ./data:/app/data
+    depends_on:
+      - postgres
+      - redis
+      - mongodb
+    restart: unless-stopped
+    networks:
+      - arbitrage_network
+    command: python main.py
+
+  # Nginx Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    container_name: arbitrage_nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - python-api
+      - nestjs-api
+      - frontend
+    networks:
+      - arbitrage_network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  mongodb_data:
+
+networks:
+  arbitrage_network:
+    driver: bridge
+

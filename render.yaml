@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: ai-arbitrage-backend
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python api/fastapi_endpoints.py
+    envVars:
+      - key: GOOGLE_API_KEY
+        value: AIzaSyBOXCq6SjXVOJg7ulD4CT8FoMEvf-wq2ng
+      - key: AI_PROVIDER
+        value: google
+      - key: AI_MODEL
+        value: gemini-2.5-flash
+      - key: DATABASE_URL
+        value: sqlite:///arbitrage.db
+      - key: PORT
+        value: 8000
+      - key: HOST
+        value: 0.0.0.0
