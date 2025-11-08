@@ -1,18 +1,19 @@
 {
   "version": 2,
-  "builds": [
-    {
-      "src": "frontend/out/**/*",
-      "use": "@vercel/static"
+  "name": "ai-arbitrage-platform",
+  "buildCommand": "cd frontend && npm install && npm run build",
+  "outputDirectory": "frontend/.next",
+  "framework": "nextjs",
+  "installCommand": "cd frontend && npm install",
+  "functions": {
+    "frontend/pages/api/**/*.ts": {
+      "maxDuration": 60
     }
-  ],
-  "routes": [
+  },
+  "rewrites": [
     {
-      "src": "/(.*)",
-      "dest": "/frontend/out/$1"
+      "source": "/(.*)",
+      "destination": "/frontend/$1"
     }
-  ],
-  "env": {
-    "RAILWAY_BACKEND_URL": "@railway_backend_url"
-  }
+  ]
 }

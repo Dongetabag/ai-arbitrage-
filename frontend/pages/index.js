@@ -9,7 +9,8 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import axios from 'axios';
 import io from 'socket.io-client';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+// Use local API routes (no external URL needed)
+const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
 
 export default function Dashboard() {
   const [opportunities, setOpportunities] = useState([]);
