@@ -1,10 +1,11 @@
-"""
-Database initialization script for PostgreSQL
-Creates required tables if they don't exist
-"""
+-- ============================================
+-- Database initialization script for PostgreSQL
+-- Creates required tables if they don't exist
+-- ============================================
 
--- Create database if not exists
-CREATE DATABASE IF NOT EXISTS arbitrage_db;
+-- Note: This script assumes database 'arbitrage_db' already exists
+-- If running manually, create database first:
+-- CREATE DATABASE arbitrage_db;
 
 -- Connect to database
 \c arbitrage_db;
