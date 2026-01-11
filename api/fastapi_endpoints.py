@@ -3,15 +3,27 @@ FastAPI Endpoints - Real-Time Data API
 Connects frontend dashboard to backend database
 """
 
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import List, Optional
-from datetime import datetime, timedelta
-from sqlalchemy import func
-import yaml
+import os
 import sys
+import yaml
+import logging
 from pathlib import Path
+from datetime import datetime, timedelta
+from typing import List, Optional
+
+from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, validator
+from sqlalchemy import func, text
+
+# Configure logging
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO"),
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -22,45 +34,88 @@ from database.models import Opportunity, Purchase, Sale, Listing
 # Initialize FastAPI
 app = FastAPI(
     title="AI Arbitrage API",
-    description="Real-time API for arbitrage platform",
-    version="1.0.0"
+    description="Real-time API for arbitrage platform with AI-powered decision making",
+    version="1.0.0",
+    docs_url="/docs" if os.getenv("ENVIRONMENT") != "production" else None,
+    redoc_url="/redoc" if os.getenv("ENVIRONMENT") != "production" else None,
 )
 
-# CORS Configuration - Allow Vercel domains
-origins = [
+# Security Headers Middleware
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    """Add security headers to all responses"""
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
+
+# Error Handler Middleware
+@app.middleware("http")
+async def error_handling_middleware(request: Request, call_next):
+    """Global error handling"""
+    try:
+        return await call_next(request)
+    except Exception as e:
+        logger.error(f"Unhandled error: {str(e)}", exc_info=True)
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={
+                "error": "Internal server error",
+                "message": str(e) if os.getenv("ENVIRONMENT") == "development" else "An error occurred",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        )
+
+# CORS Configuration
+cors_origins = os.getenv("CORS_ORIGINS", "").split(",") if os.getenv("CORS_ORIGINS") else [
     "http://localhost:3000",
     "http://localhost:3001",
-    "https://*.vercel.app",
-    "https://frontend-sage-two-68.vercel.app",
 ]
 
-# If VERCEL_URL env var exists, add it
+# Add Vercel URL if exists
 if vercel_url := os.getenv("VERCEL_URL"):
-    origins.append(f"https://{vercel_url}")
+    cors_origins.append(f"https://{vercel_url}")
+
+# Add specific frontend URL if provided
+if frontend_url := os.getenv("FRONTEND_URL"):
+    cors_origins.append(frontend_url)
+
+logger.info(f"CORS origins configured: {cors_origins}")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["*"],
 )
 
-# Initialize database with minimal config for Railway
+# Initialize database with proper error handling
+db = None
 try:
-    # Load config if available
-    with open('config/settings.yaml', 'r') as f:
-        config = yaml.safe_load(f)
-    db = DatabaseManager(config)
-except:
-    # Fallback minimal config for Railway
-    config = {
-        'database': {
-            'url': 'sqlite:///arbitrage.db'
+    config_path = Path('config/settings.yaml')
+    if config_path.exists():
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+        logger.info("Configuration loaded from settings.yaml")
+    else:
+        # Use environment variables for Railway/production
+        config = {
+            'database': {
+                'url': os.getenv('DATABASE_URL', 'sqlite:///arbitrage.db')
+            }
         }
-    }
-    db = None  # Disable database for now
+        logger.info("Using environment-based configuration")
+    
+    db = DatabaseManager(config)
+    logger.info("Database manager initialized successfully")
+except Exception as e:
+    logger.warning(f"Database initialization failed: {e}. Running in limited mode.")
+    db = None
+
 
 
 @app.get("/")
@@ -76,15 +131,31 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint for Railway"""
-    return {
+    """Health check endpoint for Railway and production monitoring"""
+    health_status = {
         "status": "healthy",
         "environment": os.getenv("RAILWAY_ENVIRONMENT", "development"),
         "service": "ai-arbitrage-api",
         "timestamp": datetime.utcnow().isoformat(),
         "version": "1.0.0",
-        "message": "AI Arbitrage System is running on Railway"
+        "ai_model": "Google Gemini 2.5 Flash"
     }
+    
+    # Check database connectivity
+    if db:
+        try:
+            session = db.get_session()
+            session.execute(text("SELECT 1"))
+            session.close()
+            health_status["database"] = "connected"
+        except Exception as e:
+            health_status["status"] = "degraded"
+            health_status["database"] = f"error: {str(e)[:50]}"
+            logger.error(f"Database health check failed: {e}")
+    else:
+        health_status["database"] = "not configured"
+    
+    return health_status
 
 # Add OPTIONS handler for preflight CORS requests
 @app.options("/{path:path}")
@@ -99,6 +170,18 @@ async def get_opportunities(
     limit: int = 50
 ):
     """Get opportunities from database"""
+    
+    if not db:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database not available"
+        )
+    
+    if limit < 1 or limit > 100:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Limit must be between 1 and 100"
+        )
     
     session = db.get_session()
     
@@ -133,7 +216,12 @@ async def get_opportunities(
             })
         
         return result
-        
+    except Exception as e:
+        logger.error(f"Error fetching opportunities: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error retrieving opportunities"
+        )
     finally:
         session.close()
 
@@ -141,6 +229,12 @@ async def get_opportunities(
 @app.get("/api/stats/daily")
 async def get_daily_stats():
     """Get daily statistics"""
+    
+    if not db:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database not available"
+        )
     
     session = db.get_session()
     
@@ -186,7 +280,12 @@ async def get_daily_stats():
             'avg_margin': float(avg_margin),
             'date': today.isoformat()
         }
-        
+    except Exception as e:
+        logger.error(f"Error fetching daily stats: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error retrieving daily statistics"
+        )
     finally:
         session.close()
 
@@ -194,6 +293,12 @@ async def get_daily_stats():
 @app.get("/api/stats/performance")
 async def get_performance():
     """Get overall performance metrics"""
+    
+    if not db:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database not available"
+        )
     
     session = db.get_session()
     
@@ -216,7 +321,12 @@ async def get_performance():
             'conversion_rate': float(conversion_rate),
             'avg_profit_per_sale': float(total_profit / total_sales) if total_sales > 0 else 0
         }
-        
+    except Exception as e:
+        logger.error(f"Error fetching performance stats: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error retrieving performance statistics"
+        )
     finally:
         session.close()
 
@@ -275,21 +385,8 @@ async def get_scan_status():
     }
 
 
-@app.get("/health")
-async def health_check():
-    """Health check endpoint"""
-    
-    return {
-        'status': 'healthy',
-        'database': 'connected',
-        'ai': 'Google Gemini 2.5 Flash',
-        'timestamp': datetime.utcnow().isoformat()
-    }
-
-
 if __name__ == "__main__":
     import uvicorn
-    import os
     port = int(os.environ.get("PORT", 8000))
     host = os.environ.get("HOST", "0.0.0.0")
     print(f"🚀 Starting AI Arbitrage API on {host}:{port}")
