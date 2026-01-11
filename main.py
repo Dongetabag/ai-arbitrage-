@@ -315,7 +315,7 @@ class ArbitrageSystem:
 
 
 async def main():
-    """Main entry point"""
+    """Main entry point with graceful shutdown"""
     
     # Configure logging
     logger.add(
@@ -325,6 +325,8 @@ async def main():
         level="INFO"
     )
     
+    system = None
+    
     try:
         # Initialize system
         system = ArbitrageSystem()
@@ -333,12 +335,17 @@ async def main():
         await system.start()
         
     except KeyboardInterrupt:
-        logger.info("Shutdown requested")
-        system.stop()
-        system.print_stats()
+        logger.info("Shutdown requested by user (Ctrl+C)")
     except Exception as e:
         logger.exception(f"Fatal error: {e}")
-        sys.exit(1)
+    finally:
+        # Graceful shutdown
+        if system:
+            logger.info("Initiating graceful shutdown...")
+            system.stop()
+            system.print_stats()
+            logger.info("Shutdown complete")
+        sys.exit(0)
 
 
 if __name__ == "__main__":

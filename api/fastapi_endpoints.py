@@ -3,15 +3,29 @@ FastAPI Endpoints - Real-Time Data API
 Connects frontend dashboard to backend database
 """
 
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import List, Optional
-from datetime import datetime, timedelta
-from sqlalchemy import func
-import yaml
+import os
 import sys
+import yaml
+import logging
 from pathlib import Path
+from datetime import datetime, timedelta
+from typing import List, Optional
+
+from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
+from sqlalchemy import func, text
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+
+# Configure logging
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO"),
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -19,52 +33,125 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from database.db_manager import DatabaseManager
 from database.models import Opportunity, Purchase, Sale, Listing
 
+# Pydantic Models for Request/Response Validation
+class PurchaseApprovalRequest(BaseModel):
+    """Model for purchase approval requests"""
+    opportunity_id: int = Field(..., gt=0, description="ID of the opportunity to purchase")
+    final_price: Optional[float] = Field(None, gt=0, description="Final negotiated price")
+    notes: Optional[str] = Field(None, max_length=500, description="Additional notes")
+
+class ScanTriggerRequest(BaseModel):
+    """Model for scan trigger requests"""
+    category: str = Field(default="all", description="Category to scan")
+    priority: Optional[str] = Field("normal", description="Priority level: low, normal, high")
+
+class HealthCheckResponse(BaseModel):
+    """Model for health check response"""
+    status: str
+    environment: str
+    service: str
+    timestamp: str
+    version: str
+    ai_model: str
+    database: str
+
+# Initialize rate limiter
+limiter = Limiter(key_func=get_remote_address, default_limits=["100/minute"])
+
 # Initialize FastAPI
 app = FastAPI(
     title="AI Arbitrage API",
-    description="Real-time API for arbitrage platform",
-    version="1.0.0"
+    description="Real-time API for arbitrage platform with AI-powered decision making",
+    version="1.0.0",
+    docs_url="/docs" if os.getenv("ENVIRONMENT") != "production" else None,
+    redoc_url="/redoc" if os.getenv("ENVIRONMENT") != "production" else None,
 )
 
-# CORS Configuration - Allow Vercel domains
-origins = [
+# Add rate limiter to app
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# Security Headers Middleware
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    """Add security headers to all responses"""
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
+
+# Error Handler Middleware
+@app.middleware("http")
+async def error_handling_middleware(request: Request, call_next):
+    """Global error handling"""
+    try:
+        return await call_next(request)
+    except Exception as e:
+        logger.error(f"Unhandled error: {str(e)}", exc_info=True)
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={
+                "error": "Internal server error",
+                "message": str(e) if os.getenv("ENVIRONMENT") == "development" else "An error occurred",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        )
+
+# CORS Configuration
+cors_origins = os.getenv("CORS_ORIGINS", "").split(",") if os.getenv("CORS_ORIGINS") else [
     "http://localhost:3000",
     "http://localhost:3001",
-    "https://*.vercel.app",
-    "https://frontend-sage-two-68.vercel.app",
 ]
 
-# If VERCEL_URL env var exists, add it
+# Add Vercel URL if exists
 if vercel_url := os.getenv("VERCEL_URL"):
-    origins.append(f"https://{vercel_url}")
+    cors_origins.append(f"https://{vercel_url}")
+
+# Add specific frontend URL if provided
+if frontend_url := os.getenv("FRONTEND_URL"):
+    cors_origins.append(frontend_url)
+
+logger.info(f"CORS origins configured: {cors_origins}")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["*"],
 )
 
-# Initialize database with minimal config for Railway
+# Initialize database with proper error handling
+db = None
 try:
-    # Load config if available
-    with open('config/settings.yaml', 'r') as f:
-        config = yaml.safe_load(f)
-    db = DatabaseManager(config)
-except:
-    # Fallback minimal config for Railway
-    config = {
-        'database': {
-            'url': 'sqlite:///arbitrage.db'
+    config_path = Path('config/settings.yaml')
+    if config_path.exists():
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+        logger.info("Configuration loaded from settings.yaml")
+    else:
+        # Use environment variables for Railway/production
+        config = {
+            'database': {
+                'url': os.getenv('DATABASE_URL', 'sqlite:///arbitrage.db')
+            }
         }
-    }
-    db = None  # Disable database for now
+        logger.info("Using environment-based configuration")
+    
+    db = DatabaseManager(config)
+    logger.info("Database manager initialized successfully")
+except Exception as e:
+    logger.warning(f"Database initialization failed: {e}. Running in limited mode.")
+    db = None
+
 
 
 @app.get("/")
-async def root():
+@limiter.limit("60/minute")
+async def root(request: Request):
     """Root endpoint"""
     return {
         "service": "AI Arbitrage API",
@@ -74,17 +161,34 @@ async def root():
         "timestamp": datetime.utcnow().isoformat()
     }
 
-@app.get("/health")
+@app.get("/health", response_model=HealthCheckResponse)
 async def health_check():
-    """Health check endpoint for Railway"""
-    return {
+    """Health check endpoint for Railway and production monitoring"""
+    health_status = {
         "status": "healthy",
-        "environment": os.getenv("RAILWAY_ENVIRONMENT", "development"),
+        "environment": os.getenv("RAILWAY_ENVIRONMENT", os.getenv("ENVIRONMENT", "development")),
         "service": "ai-arbitrage-api",
         "timestamp": datetime.utcnow().isoformat(),
         "version": "1.0.0",
-        "message": "AI Arbitrage System is running on Railway"
+        "ai_model": "Google Gemini 2.5 Flash",
+        "database": "unknown"
     }
+    
+    # Check database connectivity
+    if db:
+        try:
+            session = db.get_session()
+            session.execute(text("SELECT 1"))
+            session.close()
+            health_status["database"] = "connected"
+        except Exception as e:
+            health_status["status"] = "degraded"
+            health_status["database"] = f"error: {str(e)[:50]}"
+            logger.error(f"Database health check failed: {e}")
+    else:
+        health_status["database"] = "not configured"
+    
+    return health_status
 
 # Add OPTIONS handler for preflight CORS requests
 @app.options("/{path:path}")
@@ -93,12 +197,26 @@ async def options_handler(path: str):
 
 
 @app.get("/api/opportunities")
+@limiter.limit("30/minute")
 async def get_opportunities(
+    request: Request,
     category: Optional[str] = None,
     status: Optional[str] = None,
     limit: int = 50
 ):
     """Get opportunities from database"""
+    
+    if not db:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database not available"
+        )
+    
+    if limit < 1 or limit > 100:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Limit must be between 1 and 100"
+        )
     
     session = db.get_session()
     
@@ -133,14 +251,26 @@ async def get_opportunities(
             })
         
         return result
-        
+    except Exception as e:
+        logger.error(f"Error fetching opportunities: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error retrieving opportunities"
+        )
     finally:
         session.close()
 
 
 @app.get("/api/stats/daily")
-async def get_daily_stats():
+@limiter.limit("30/minute")
+async def get_daily_stats(request: Request):
     """Get daily statistics"""
+    
+    if not db:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database not available"
+        )
     
     session = db.get_session()
     
@@ -186,14 +316,26 @@ async def get_daily_stats():
             'avg_margin': float(avg_margin),
             'date': today.isoformat()
         }
-        
+    except Exception as e:
+        logger.error(f"Error fetching daily stats: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error retrieving daily statistics"
+        )
     finally:
         session.close()
 
 
 @app.get("/api/stats/performance")
-async def get_performance():
+@limiter.limit("30/minute")
+async def get_performance(request: Request):
     """Get overall performance metrics"""
+    
+    if not db:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database not available"
+        )
     
     session = db.get_session()
     
@@ -216,45 +358,49 @@ async def get_performance():
             'conversion_rate': float(conversion_rate),
             'avg_profit_per_sale': float(total_profit / total_sales) if total_sales > 0 else 0
         }
-        
+    except Exception as e:
+        logger.error(f"Error fetching performance stats: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error retrieving performance statistics"
+        )
     finally:
         session.close()
 
 
 @app.post("/api/purchase/approve")
-async def approve_purchase(data: dict):
+@limiter.limit("10/minute")
+async def approve_purchase(request: Request, data: PurchaseApprovalRequest):
     """Approve a purchase"""
     
-    opportunity_id = data.get('opportunity_id')
+    logger.info(f"Purchase approval requested for opportunity {data.opportunity_id}")
     
     # TODO: Trigger purchase flow
     # For now, just acknowledge
     
     return {
         'status': 'approved',
-        'opportunity_id': opportunity_id,
-        'message': 'Purchase approval received. Processing...'
+        'opportunity_id': data.opportunity_id,
+        'final_price': data.final_price,
+        'message': 'Purchase approval received. Processing...',
+        'timestamp': datetime.utcnow().isoformat()
     }
 
 
 @app.post("/api/scan/trigger")
-async def trigger_scan(data: dict):
+@limiter.limit("5/minute")
+async def trigger_scan(request: Request, data: ScanTriggerRequest):
     """Trigger immediate marketplace scan"""
     
-    from datetime import datetime
-    import asyncio
-    
-    category = data.get('category', 'all')
-    
-    # Log the scan request
-    print(f"🔍 Force scan triggered for category: {category} at {datetime.utcnow()}")
+    logger.info(f"Scan triggered for category: {data.category} with priority: {data.priority}")
     
     # In production, this would trigger the actual scanner
     # For now, return success to show UI feedback works
     
     return {
         'status': 'scanning',
-        'category': category,
+        'category': data.category,
+        'priority': data.priority,
         'message': 'Marketplace scan initiated',
         'estimated_duration_seconds': 300,  # 5 minutes
         'timestamp': datetime.utcnow().isoformat()
@@ -262,7 +408,8 @@ async def trigger_scan(data: dict):
 
 
 @app.get("/api/scan/status")
-async def get_scan_status():
+@limiter.limit("30/minute")
+async def get_scan_status(request: Request):
     """Get current scan status"""
     
     return {
@@ -275,22 +422,38 @@ async def get_scan_status():
     }
 
 
-@app.get("/health")
-async def health_check():
-    """Health check endpoint"""
-    
-    return {
-        'status': 'healthy',
-        'database': 'connected',
-        'ai': 'Google Gemini 2.5 Flash',
-        'timestamp': datetime.utcnow().isoformat()
-    }
-
-
 if __name__ == "__main__":
     import uvicorn
-    import os
     port = int(os.environ.get("PORT", 8000))
     host = os.environ.get("HOST", "0.0.0.0")
     print(f"🚀 Starting AI Arbitrage API on {host}:{port}")
-    uvicorn.run(app, host=host, port=port, workers=2)
+    uvicorn.run(
+        app, 
+        host=host, 
+        port=port, 
+        workers=int(os.environ.get("WORKERS", 2)),
+        log_level=os.environ.get("LOG_LEVEL", "info").lower(),
+        access_log=True,
+        timeout_keep_alive=30,
+        limit_concurrency=1000
+    )
+
+
+# Startup and shutdown events
+@app.on_event("startup")
+async def startup_event():
+    """Application startup"""
+    logger.info("AI Arbitrage API starting up...")
+    logger.info(f"Environment: {os.getenv('ENVIRONMENT', 'development')}")
+    logger.info(f"Database: {'Connected' if db else 'Not configured'}")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Application shutdown - cleanup resources"""
+    logger.info("AI Arbitrage API shutting down...")
+    if db:
+        logger.info("Closing database connections...")
+        # Add cleanup if needed
+    logger.info("Shutdown complete")
+
