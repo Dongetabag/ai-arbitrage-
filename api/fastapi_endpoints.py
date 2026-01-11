@@ -15,8 +15,11 @@ from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, Field, validator
 from sqlalchemy import func, text
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 # Configure logging
 logging.basicConfig(
@@ -31,6 +34,31 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from database.db_manager import DatabaseManager
 from database.models import Opportunity, Purchase, Sale, Listing
 
+# Pydantic Models for Request/Response Validation
+class PurchaseApprovalRequest(BaseModel):
+    """Model for purchase approval requests"""
+    opportunity_id: int = Field(..., gt=0, description="ID of the opportunity to purchase")
+    final_price: Optional[float] = Field(None, gt=0, description="Final negotiated price")
+    notes: Optional[str] = Field(None, max_length=500, description="Additional notes")
+
+class ScanTriggerRequest(BaseModel):
+    """Model for scan trigger requests"""
+    category: str = Field(default="all", description="Category to scan")
+    priority: Optional[str] = Field("normal", description="Priority level: low, normal, high")
+
+class HealthCheckResponse(BaseModel):
+    """Model for health check response"""
+    status: str
+    environment: str
+    service: str
+    timestamp: str
+    version: str
+    ai_model: str
+    database: str
+
+# Initialize rate limiter
+limiter = Limiter(key_func=get_remote_address, default_limits=["100/minute"])
+
 # Initialize FastAPI
 app = FastAPI(
     title="AI Arbitrage API",
@@ -39,6 +67,10 @@ app = FastAPI(
     docs_url="/docs" if os.getenv("ENVIRONMENT") != "production" else None,
     redoc_url="/redoc" if os.getenv("ENVIRONMENT") != "production" else None,
 )
+
+# Add rate limiter to app
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Security Headers Middleware
 @app.middleware("http")
@@ -119,7 +151,8 @@ except Exception as e:
 
 
 @app.get("/")
-async def root():
+@limiter.limit("60/minute")
+async def root(request: Request):
     """Root endpoint"""
     return {
         "service": "AI Arbitrage API",
@@ -129,16 +162,17 @@ async def root():
         "timestamp": datetime.utcnow().isoformat()
     }
 
-@app.get("/health")
+@app.get("/health", response_model=HealthCheckResponse)
 async def health_check():
     """Health check endpoint for Railway and production monitoring"""
     health_status = {
         "status": "healthy",
-        "environment": os.getenv("RAILWAY_ENVIRONMENT", "development"),
+        "environment": os.getenv("RAILWAY_ENVIRONMENT", os.getenv("ENVIRONMENT", "development")),
         "service": "ai-arbitrage-api",
         "timestamp": datetime.utcnow().isoformat(),
         "version": "1.0.0",
-        "ai_model": "Google Gemini 2.5 Flash"
+        "ai_model": "Google Gemini 2.5 Flash",
+        "database": "unknown"
     }
     
     # Check database connectivity
@@ -164,7 +198,9 @@ async def options_handler(path: str):
 
 
 @app.get("/api/opportunities")
+@limiter.limit("30/minute")
 async def get_opportunities(
+    request: Request,
     category: Optional[str] = None,
     status: Optional[str] = None,
     limit: int = 50
@@ -227,7 +263,8 @@ async def get_opportunities(
 
 
 @app.get("/api/stats/daily")
-async def get_daily_stats():
+@limiter.limit("30/minute")
+async def get_daily_stats(request: Request):
     """Get daily statistics"""
     
     if not db:
@@ -291,7 +328,8 @@ async def get_daily_stats():
 
 
 @app.get("/api/stats/performance")
-async def get_performance():
+@limiter.limit("30/minute")
+async def get_performance(request: Request):
     """Get overall performance metrics"""
     
     if not db:
@@ -332,39 +370,38 @@ async def get_performance():
 
 
 @app.post("/api/purchase/approve")
-async def approve_purchase(data: dict):
+@limiter.limit("10/minute")
+async def approve_purchase(request: Request, data: PurchaseApprovalRequest):
     """Approve a purchase"""
     
-    opportunity_id = data.get('opportunity_id')
+    logger.info(f"Purchase approval requested for opportunity {data.opportunity_id}")
     
     # TODO: Trigger purchase flow
     # For now, just acknowledge
     
     return {
         'status': 'approved',
-        'opportunity_id': opportunity_id,
-        'message': 'Purchase approval received. Processing...'
+        'opportunity_id': data.opportunity_id,
+        'final_price': data.final_price,
+        'message': 'Purchase approval received. Processing...',
+        'timestamp': datetime.utcnow().isoformat()
     }
 
 
 @app.post("/api/scan/trigger")
-async def trigger_scan(data: dict):
+@limiter.limit("5/minute")
+async def trigger_scan(request: Request, data: ScanTriggerRequest):
     """Trigger immediate marketplace scan"""
     
-    from datetime import datetime
-    import asyncio
-    
-    category = data.get('category', 'all')
-    
-    # Log the scan request
-    print(f"🔍 Force scan triggered for category: {category} at {datetime.utcnow()}")
+    logger.info(f"Scan triggered for category: {data.category} with priority: {data.priority}")
     
     # In production, this would trigger the actual scanner
     # For now, return success to show UI feedback works
     
     return {
         'status': 'scanning',
-        'category': category,
+        'category': data.category,
+        'priority': data.priority,
         'message': 'Marketplace scan initiated',
         'estimated_duration_seconds': 300,  # 5 minutes
         'timestamp': datetime.utcnow().isoformat()
@@ -372,7 +409,8 @@ async def trigger_scan(data: dict):
 
 
 @app.get("/api/scan/status")
-async def get_scan_status():
+@limiter.limit("30/minute")
+async def get_scan_status(request: Request):
     """Get current scan status"""
     
     return {
@@ -390,4 +428,33 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     host = os.environ.get("HOST", "0.0.0.0")
     print(f"🚀 Starting AI Arbitrage API on {host}:{port}")
-    uvicorn.run(app, host=host, port=port, workers=2)
+    uvicorn.run(
+        app, 
+        host=host, 
+        port=port, 
+        workers=int(os.environ.get("WORKERS", 2)),
+        log_level=os.environ.get("LOG_LEVEL", "info").lower(),
+        access_log=True,
+        timeout_keep_alive=30,
+        limit_concurrency=1000
+    )
+
+
+# Startup and shutdown events
+@app.on_event("startup")
+async def startup_event():
+    """Application startup"""
+    logger.info("AI Arbitrage API starting up...")
+    logger.info(f"Environment: {os.getenv('ENVIRONMENT', 'development')}")
+    logger.info(f"Database: {'Connected' if db else 'Not configured'}")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Application shutdown - cleanup resources"""
+    logger.info("AI Arbitrage API shutting down...")
+    if db:
+        logger.info("Closing database connections...")
+        # Add cleanup if needed
+    logger.info("Shutdown complete")
+
